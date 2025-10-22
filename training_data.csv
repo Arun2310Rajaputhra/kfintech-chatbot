@@ -1,0 +1,10 @@
+text,intent
+"I want to check my withdrawal status","withdrawal_status"
+"My withdrawal is pending","withdrawal_status"
+"Where is my withdrawal money","withdrawal_status"
+"I want to see my investment portfolio","investment_query"
+"My investments are not showing","investment_query"
+"Where is my commission","commission_query"
+"Commission not received","commission_query"
+"How to open new account","account_help"
+"Account opening process","account_help"

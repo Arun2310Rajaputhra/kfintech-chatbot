@@ -1,0 +1,4 @@
+customer_id,query_type,details,status,processing_time
+"CUST001","withdrawal","Withdrawal #W123456","processing","3-5 business days"
+"CUST002","investment","Portfolio #P789012","active","immediate"
+"CUST003","commission","Commission #C345678","processed","2-3 business days"
