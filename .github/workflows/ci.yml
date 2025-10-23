@@ -1,0 +1,65 @@
+name: CI/CD Pipeline
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      
+      - name: Run ML tests
+        run: |
+          python -c "
+          import pandas as pd
+          import joblib
+          from sklearn.feature_extraction.text import TfidfVectorizer
+          from sklearn.ensemble import RandomForestClassifier
+          print('✅ All imports work')
+          
+          # Test data loading
+          data = pd.read_csv('training_data.csv')
+          assert len(data) > 0, 'Training data empty'
+          print('✅ Data loading works -', len(data), 'samples')
+          
+          # Test model training
+          vectorizer = TfidfVectorizer(max_features=100)
+          X = vectorizer.fit_transform(data['text'])
+          model = RandomForestClassifier(n_estimators=10)
+          model.fit(X, data['intent'])
+          print('✅ Model training works')
+          
+          # Test prediction
+          test_query = 'where is my withdrawal'
+          X_test = vectorizer.transform([test_query])
+          prediction = model.predict(X_test)[0]
+          print('✅ Prediction works:', prediction)
+          "
+      
+      - name: Test Streamlit app
+        run: |
+          python -c "
+          import streamlit as st
+          print('✅ Streamlit imports work')
+          "
+  
+  deploy:
+    needs: test  # Wait for tests to pass
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'  # Only deploy from main branch
+    
+    steps:
+      - name: Deploy Notification
+        run: |
+          echo "🎉 CI TESTS PASSED!"
+          echo "📱 Streamlit will auto-deploy the new version"
+          echo "🌐 Live at: https://kfintech-chatbot-a8ruwwxfmqwxkr8dfhmsww.streamlit.app/"
+          echo "⏰ Deployment usually takes 2-3 minutes"
