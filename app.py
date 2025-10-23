@@ -3,6 +3,7 @@ import pandas as pd
 import joblib
 import os
 import json
+import hashlib
 from datetime import datetime
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.ensemble import RandomForestClassifier
@@ -10,45 +11,129 @@ from sklearn.ensemble import RandomForestClassifier
 # Set page config
 st.set_page_config(page_title="KFintech Chatbot", page_icon="💬")
 
-st.title("🤖 KFintech Customer Service Chatbot")
-st.write("How can I help you with your brokerage queries today?")
+# ========================
+# AUTHENTICATION SYSTEM
+# ========================
 
-# Analytics tracking
+# User database (in production, use real database)
+USER_DB = {
+    "admin": {
+        "password": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",  # "password"
+        "role": "admin",
+        "name": "Administrator"
+    },
+    "user": {
+        "password": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",  # "password"  
+        "role": "user",
+        "name": "Regular User"
+    }
+}
+
+def hash_password(password):
+    """Hash password for security"""
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def authenticate_user(username, password):
+    """Authenticate user credentials"""
+    if username in USER_DB:
+        hashed_input = hash_password(password)
+        if USER_DB[username]["password"] == hashed_input:
+            return USER_DB[username]
+    return None
+
+def init_session_state():
+    """Initialize session state variables"""
+    if 'authenticated' not in st.session_state:
+        st.session_state.authenticated = False
+    if 'user_role' not in st.session_state:
+        st.session_state.user_role = None
+    if 'username' not in st.session_state:
+        st.session_state.username = None
+
+init_session_state()
+
+# ========================
+# LOGIN PAGE
+# ========================
+
+if not st.session_state.authenticated:
+    st.title("🔐 KFintech Login")
+    st.write("Please login to access the AI Chatbot")
+    
+    with st.form("login_form"):
+        username = st.text_input("Username", placeholder="Enter username")
+        password = st.text_input("Password", type="password", placeholder="Enter password")
+        submit = st.form_submit_button("Login")
+        
+        if submit:
+            user_info = authenticate_user(username, password)
+            if user_info:
+                st.session_state.authenticated = True
+                st.session_state.user_role = user_info["role"]
+                st.session_state.username = user_info["name"]
+                st.success(f"✅ Welcome, {user_info['name']}!")
+                st.rerun()
+            else:
+                st.error("❌ Invalid username or password")
+    
+    # Demo credentials
+    st.info("""
+    **Demo Credentials:**
+    - **Admin:** username: `admin`, password: `password`  
+    - **User:** username: `user`, password: `password`
+    """)
+    
+    st.stop()  # Stop here if not authenticated
+
+# ========================
+# MAIN APPLICATION
+# ========================
+
+st.title(f"🤖 KFintech Customer Service Chatbot")
+st.write(f"Welcome, **{st.session_state.username}**! | Role: **{st.session_state.user_role.title()}**")
+
+# Logout button
+if st.sidebar.button("🚪 Logout"):
+    st.session_state.authenticated = False
+    st.session_state.user_role = None
+    st.session_state.username = None
+    st.rerun()
+
+# Analytics tracking (only for authenticated users)
 analytics_file = "analytics.json"
 
-def track_usage(query, intent):
-    """Track user queries without external dependencies"""
+def track_usage(query, intent, username):
+    """Track user queries"""
     try:
-        # Load existing analytics or create new
         if os.path.exists(analytics_file):
             with open(analytics_file, "r") as f:
                 data = json.load(f)
         else:
-            data = {"queries": [], "page_views": 0, "sessions": []}
-        
-        # Add current session if not exists
-        session_id = st.query_params.get("session", "default")
-        current_session = {
-            "session_id": session_id,
-            "start_time": datetime.now().isoformat(),
-            "queries_count": 0
-        }
+            data = {"queries": [], "page_views": 0, "user_activity": {}}
         
         # Update analytics
         data["page_views"] += 1
+        
+        # Track user-specific activity
+        if username not in data["user_activity"]:
+            data["user_activity"][username] = {"query_count": 0, "last_active": ""}
+        
+        data["user_activity"][username]["query_count"] += 1
+        data["user_activity"][username]["last_active"] = datetime.now().isoformat()
+        
         data["queries"].append({
             "timestamp": datetime.now().isoformat(),
+            "username": username,
+            "role": st.session_state.user_role,
             "query": query,
-            "intent": intent,
-            "session_id": session_id
+            "intent": intent
         })
         
-        # Save analytics
         with open(analytics_file, "w") as f:
             json.dump(data, f, indent=2)
             
     except Exception as e:
-        pass  # Fail silently for deployment
+        pass
 
 # Load or create models
 @st.cache_resource
@@ -72,7 +157,12 @@ def load_models():
 
 vectorizer, model, business_data = load_models()
 
-# Chat interface
+# ========================
+# CHATBOT INTERFACE
+# ========================
+
+st.write("How can I help you with your brokerage queries today?")
+
 user_query = st.text_input("Enter your query:", placeholder="e.g., Where is my withdrawal?")
 
 if user_query:
@@ -80,8 +170,8 @@ if user_query:
     query_vec = vectorizer.transform([user_query])
     intent = model.predict(query_vec)[0]
     
-    # TRACK USAGE
-    track_usage(user_query, intent)
+    # TRACK USAGE with username
+    track_usage(user_query, intent, st.session_state.username)
     
     # Get business data
     business_info = business_data[business_data['query_type'] == intent.split('_')[0]]
@@ -106,43 +196,71 @@ if user_query:
 st.write("---")
 st.write("💡 **Try queries like:** 'where is my withdrawal', 'check investments', 'commission status'")
 
-# ANALYTICS DASHBOARD
-st.write("---")
-st.subheader("📊 Live Analytics Dashboard")
+# ========================
+# ROLE-BASED FEATURES
+# ========================
 
-try:
-    if os.path.exists(analytics_file):
-        with open(analytics_file, "r") as f:
-            data = json.load(f)
-        
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Total Page Views", data.get("page_views", 0))
-        with col2:
-            st.metric("Total Queries", len(data.get("queries", [])))
-        with col3:
-            unique_sessions = len(set(q['session_id'] for q in data.get("queries", [])))
-            st.metric("Unique Sessions", unique_sessions)
-        
-        # Show recent activity
-        st.subheader("📈 Recent Activity")
-        recent_queries = data.get("queries", [])[-10:]  # Last 10 queries
-        for query in recent_queries:
-            time = query['timestamp'][11:16]  # Extract time only
-            st.write(f"🕒 {time} - '{query['query']}' → **{query['intent']}**")
+# ADMIN-ONLY FEATURES
+if st.session_state.user_role == "admin":
+    st.write("---")
+    st.subheader("👑 Admin Dashboard")
+    
+    # User management
+    st.write("**User Management**")
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("View All Users"):
+            st.write("**Registered Users:**")
+            for username, info in USER_DB.items():
+                st.write(f"- {username} ({info['role']})")
+    with col2:
+        if st.button("System Status"):
+            st.success("✅ All systems operational")
+    
+    # Analytics Dashboard (Admin only)
+    st.subheader("📊 Advanced Analytics")
+    
+    try:
+        if os.path.exists(analytics_file):
+            with open(analytics_file, "r") as f:
+                data = json.load(f)
             
-    else:
-        st.info("📊 Analytics: No data yet. Use the chatbot to see analytics!")
-        
-except Exception as e:
-    st.info("📊 Analytics: Collecting initial data...")
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Total Page Views", data.get("page_views", 0))
+            with col2:
+                st.metric("Total Queries", len(data.get("queries", [])))
+            with col3:
+                unique_users = len(data.get("user_activity", {}))
+                st.metric("Active Users", unique_users)
+            with col4:
+                admin_queries = len([q for q in data.get("queries", []) if q.get('role') == 'admin'])
+                st.metric("Admin Queries", admin_queries)
+            
+            # User activity breakdown
+            st.write("**User Activity:**")
+            for user, activity in data.get("user_activity", {}).items():
+                st.write(f"- {user}: {activity['query_count']} queries")
+                
+            # Recent activity with usernames
+            st.write("**Recent Activity:**")
+            recent_queries = data.get("queries", [])[-10:]
+            for query in recent_queries:
+                time = query['timestamp'][11:16]
+                st.write(f"🕒 {time} - **{query['username']}** asked '{query['query']}'")
+                
+        else:
+            st.info("📊 Analytics: No data yet. Use the chatbot to see analytics!")
+            
+    except Exception as e:
+        st.info("📊 Analytics: Loading...")
 
-# ALERTS SECTION
-st.subheader("🔔 Real-time Alerts")
-if st.button("Check System Status"):
-    st.success("""
-    ✅ **System Status: ACTIVE**
-    📊 Analytics: COLLECTING DATA
-    🤖 AI Model: OPERATIONAL
-    🌐 Deployment: LIVE
-    """)
+# REGULAR USER FEATURES
+else:
+    st.write("---")
+    st.info("ℹ️ **User Tip:** Contact admin for analytics access and advanced features.")
+
+# System Alerts
+st.write("---")
+st.subheader("🔔 System Status")
+st.success(f"✅ Logged in as: {st.session_state.username} | Role: {st.session_state.user_role}")
